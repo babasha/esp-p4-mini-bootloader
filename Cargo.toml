@@ -14,8 +14,8 @@ name = "mini-bootloader"
 path = "src/main.rs"
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
-bootloader = { package = "esp-p4-bootloader", path = "../esp-p4-bootloader" }
-psram = { package = "esp-p4-psram", path = "../esp-p4-psram" }
+bootloader = { package = "esp-p4-bootloader", version = "0.1" }
+psram = { package = "esp-p4-psram", version = "0.1" }
 panic-halt = "0.2"
 riscv-rt = { version = "0.16", features = ["memory", "device"] }
 sha2 = { version = "0.10", default-features = false }
