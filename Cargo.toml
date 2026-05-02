@@ -1,0 +1,29 @@
+[package]
+name = "esp-p4-mini-bootloader"
+version = "0.1.0"
+edition = "2021"
+description = "All-Rust 1st-stage bootloader for ESP32-P4. Replaces IDF v5.3 bootloader.bin (which has hard architectural assumptions about app segment layout that no_std Rust apps don't satisfy). ROM loads us from flash@0x2000; we init the chip, read the partition table, locate the factory app, verify its appended SHA256, load segments via cache, and jump to its entry."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/babasha/esp-p4-mini-bootloader"
+readme = "README.md"
+keywords = ["esp32p4", "bootloader", "no-std", "embedded", "espressif"]
+categories = ["embedded", "no-std", "hardware-support"]
+
+[[bin]]
+name = "mini-bootloader"
+path = "src/main.rs"
+
+[target.'cfg(target_arch = "riscv32")'.dependencies]
+bootloader = { package = "esp-p4-bootloader", path = "../esp-p4-bootloader" }
+psram = { package = "esp-p4-psram", path = "../esp-p4-psram" }
+panic-halt = "0.2"
+riscv-rt = { version = "0.16", features = ["memory", "device"] }
+sha2 = { version = "0.10", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+debug = false
+strip = "symbols"
+panic = "abort"
