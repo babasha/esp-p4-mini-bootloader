@@ -14,9 +14,17 @@ name = "mini-bootloader"
 path = "src/main.rs"
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
-bootloader = { package = "esp-p4-bootloader", version = "0.1" }
+# Path overrides for in-progress workspace development. Before
+# publishing, drop the `path = …` half so cargo resolves to the
+# crates.io version (or bump the version pin to one that contains the
+# new APIs).
+bootloader = { package = "esp-p4-bootloader", version = "0.1", path = "../../esp-p4-bootloader/esp-p4-bootloader" }
 psram = { package = "esp-p4-psram", version = "0.1" }
-panic-halt = "0.2"
+p4_cfg = { package = "esp-p4-cfg", path = "../../esp-p4-cfg" }
+p4_crashdump = { package = "esp-p4-crashdump", path = "../../esp-p4-crashdump" }
+p4_boot_history = { package = "esp-p4-boot-history", path = "../../esp-p4-boot-history" }
+p4_bootstat = { package = "esp-p4-bootstat", path = "../../esp-p4-bootstat" }
+p4_ota = { package = "esp-p4-ota", path = "../../esp-p4-ota" }
 riscv-rt = { version = "0.16", features = ["memory", "device"] }
 sha2 = { version = "0.10", default-features = false }
 

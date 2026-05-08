@@ -12,6 +12,11 @@
 #![allow(dead_code)]
 
 const ESP_ROM_SPIFLASH_READ: usize = 0x4FC0_0158;
+const ESP_ROM_SPIFLASH_WRITE: usize = 0x4FC0_0154;
+const ESP_ROM_SPIFLASH_ERASE_SECTOR: usize = 0x4FC0_014C;
+
+/// Sector size on every P4 SPI flash part we ship — 4 KB.
+pub const SECTOR_SIZE: u32 = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlashError {
@@ -60,6 +65,51 @@ pub fn read_u32(addr: u32) -> Result<u32, FlashError> {
     // SAFETY: 4-byte aligned by the array, len is 4.
     unsafe { read(addr, ptr, 4)? };
     Ok(buf[0])
+}
+
+/// Erase a single 4 KB sector. `sector_offset` is the absolute flash byte
+/// offset (must be a multiple of [`SECTOR_SIZE`]).
+///
+/// SAFETY:
+/// - Single-hart at boot, with no concurrent flash users.
+/// - The sector is unconditionally written to `0xFF`; any data inside
+///   becomes inaccessible.
+pub unsafe fn erase_sector(sector_offset: u32) -> Result<(), FlashError> {
+    if sector_offset % SECTOR_SIZE != 0 {
+        return Err(FlashError::Unaligned);
+    }
+    type RomFn = unsafe extern "C" fn(sector_idx: u32) -> i32;
+    let f: RomFn = unsafe { core::mem::transmute(ESP_ROM_SPIFLASH_ERASE_SECTOR) };
+    let r = unsafe { f(sector_offset / SECTOR_SIZE) };
+    if r == 0 {
+        Ok(())
+    } else {
+        Err(FlashError::Rom(r))
+    }
+}
+
+/// Write `len` bytes from `src` to flash physical address `addr`.
+///
+/// `src` must be 4-byte aligned and `len` must be a multiple of 4 (ROM
+/// hard requirement). The destination sector(s) must already be erased
+/// — flash bits can only flip 1 → 0, so writing onto un-erased data
+/// silently corrupts it.
+///
+/// SAFETY:
+/// - `src` must be a valid pointer to `len` readable bytes.
+/// - Single-hart at boot.
+pub unsafe fn write(addr: u32, src: *const u8, len: usize) -> Result<(), FlashError> {
+    if len % 4 != 0 || (src as usize) % 4 != 0 {
+        return Err(FlashError::Unaligned);
+    }
+    type RomFn = unsafe extern "C" fn(target: u32, src: *const u32, len: i32) -> i32;
+    let f: RomFn = unsafe { core::mem::transmute(ESP_ROM_SPIFLASH_WRITE) };
+    let r = unsafe { f(addr, src as *const u32, len as i32) };
+    if r == 0 {
+        Ok(())
+    } else {
+        Err(FlashError::Rom(r))
+    }
 }
 
 #[cfg(test)]

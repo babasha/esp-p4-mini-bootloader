@@ -1,8 +1,35 @@
-# IDF singleapp partition layout for ESP32-P4 (2 MB flash).
-# Matches the layout used by MIGRATION_PLAN/idf_psram_test/ that already
-# boots the IDF bootloader.bin we ship in this directory.
+# IDF-style A/B-OTA partition layout for ESP32-P4 (2 MB flash).
 #
-# Name,    Type, SubType, Offset,  Size,    Flags
-nvs,       data, nvs,     0x9000,  0x6000,
-phy_init,  data, phy,     0xf000,  0x1000,
-factory,   app,  factory, 0x10000, 0x100000,
+# `identity`  — esp-p4-cfg provisioning blob (board_id / house_id / token).
+#                Same firmware on every board; survives OTA replacement.
+# `otadata`   — esp-p4-ota state (4 KB sector). Bootloader reads this to
+#                decide which app slot to boot, increments the boot-attempt
+#                counter for unverified slots, and rolls back to the last
+#                known-good slot after MAX_ATTEMPTS failures.
+# `ota_0`/`ota_1` — two 768 KB app slots (A and B). OTA writes into the
+#                inactive slot, then stages it via otadata.
+# `crashdump` — esp-p4-crashdump capture buffer (8 KB = 2 sectors). Panic /
+#                trap handlers serialise CSRs, register file, panic message
+#                and a UART tail into the first sector; the next boot the
+#                mini-bootloader checks the magic and prints the dump on
+#                UART so it can be forwarded for post-mortem analysis.
+#                The second sector is reserved for future format growth.
+# `bootlog`   — esp-p4-boot-history ring of the last 64 boots (timestamp,
+#                reset reason, previous-boot uptime, monotonic seq).
+#                Pattern detection ("device reboots three times a day").
+# `bootstat`  — esp-p4-bootstat single most-recent diagnostic record (4 KB
+#                sector, append-log of 64 fixed-size 64-byte records).
+#                Tracks cumulative boot_count / crash_count / uptime_hours
+#                and the last reset reason — what the service-token MQTT
+#                hello includes for fleet health.
+#
+# Name,     Type, SubType, Offset,  Size,    Flags
+nvs,        data, nvs,     0x9000,  0x4000,
+identity,   data, nvs,     0xD000,  0x1000,
+phy_init,   data, phy,     0xE000,  0x1000,
+otadata,    data, ota,     0xF000,  0x1000,
+crashdump,  data, nvs,     0x10000, 0x2000,
+bootlog,    data, nvs,     0x12000, 0x1000,
+bootstat,   data, nvs,     0x13000, 0x1000,
+ota_0,      app,  ota_0,   0x20000, 0xC0000,
+ota_1,      app,  ota_1,   0xE0000, 0xC0000,

@@ -81,8 +81,9 @@ impl From<flash::FlashError> for PartitionError {
     }
 }
 
-pub fn find_factory_app() -> Result<PartitionEntry, PartitionError> {
-    // Read PT into a 4-byte aligned buffer (stack [u32; N]).
+/// Walk the partition table, calling `f` for each valid entry. Stops on
+/// the first terminator (non-magic entry). MD5 markers are skipped.
+fn for_each_entry<F: FnMut(&PartitionEntry) -> bool>(mut f: F) -> Result<(), flash::FlashError> {
     const N: usize = PARTITION_TABLE_READ_LEN / 4;
     let mut buf32 = [0u32; N];
     // SAFETY: 4-byte aligned by [u32; N]; len is N*4 = PARTITION_TABLE_READ_LEN.
@@ -104,22 +105,44 @@ pub fn find_factory_app() -> Result<PartitionEntry, PartitionError> {
         match magic {
             ESP_PARTITION_MAGIC => {
                 if let Some(e) = PartitionEntry::parse(&entry) {
-                    if e.kind == PART_TYPE_APP && e.subtype == PART_SUBTYPE_FACTORY {
-                        return Ok(e);
+                    if !f(&e) {
+                        return Ok(());
                     }
                 }
             }
-            ESP_PARTITION_MAGIC_MD5 => {
-                // MD5 marker, skip.
-            }
-            _ => {
-                // First non-magic entry is the terminator (0xFFFF on
-                // unwritten flash, or a tail of zeros). Stop scanning.
-                break;
-            }
+            ESP_PARTITION_MAGIC_MD5 => { /* skip */ }
+            _ => break, // terminator
         }
     }
-    Err(PartitionError::NoFactoryApp)
+    Ok(())
+}
+
+pub fn find_factory_app() -> Result<PartitionEntry, PartitionError> {
+    let mut found: Option<PartitionEntry> = None;
+    for_each_entry(|e| {
+        if e.kind == PART_TYPE_APP && e.subtype == PART_SUBTYPE_FACTORY {
+            found = Some(*e);
+            false // stop walking
+        } else {
+            true // keep walking
+        }
+    })?;
+    found.ok_or(PartitionError::NoFactoryApp)
+}
+
+/// Find a partition entry by label (NUL-trimmed). Returns the first
+/// match; partition labels are unique by IDF convention.
+pub fn find_by_label(label: &str) -> Result<PartitionEntry, PartitionError> {
+    let mut found: Option<PartitionEntry> = None;
+    for_each_entry(|e| {
+        if e.label_str() == label {
+            found = Some(*e);
+            false
+        } else {
+            true
+        }
+    })?;
+    found.ok_or(PartitionError::NoFactoryApp)
 }
 
 #[cfg(test)]
