@@ -1,7 +1,5 @@
 # IDF-style A/B-OTA partition layout for ESP32-P4 (2 MB flash).
 #
-# `identity`  — esp-p4-cfg provisioning blob (board_id / house_id / token).
-#                Same firmware on every board; survives OTA replacement.
 # `otadata`   — esp-p4-ota state (4 KB sector). Bootloader reads this to
 #                decide which app slot to boot, increments the boot-attempt
 #                counter for unverified slots, and rolls back to the last
@@ -20,12 +18,10 @@
 # `bootstat`  — esp-p4-bootstat single most-recent diagnostic record (4 KB
 #                sector, append-log of 64 fixed-size 64-byte records).
 #                Tracks cumulative boot_count / crash_count / uptime_hours
-#                and the last reset reason — what the service-token MQTT
-#                hello includes for fleet health.
+#                and the last reset reason for fleet health telemetry.
 #
 # Name,     Type, SubType, Offset,  Size,    Flags
 nvs,        data, nvs,     0x9000,  0x4000,
-identity,   data, nvs,     0xD000,  0x1000,
 phy_init,   data, phy,     0xE000,  0x1000,
 otadata,    data, ota,     0xF000,  0x1000,
 crashdump,  data, nvs,     0x10000, 0x2000,

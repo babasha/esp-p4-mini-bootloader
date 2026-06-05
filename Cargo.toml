@@ -1,8 +1,8 @@
 [package]
 name = "esp-p4-mini-bootloader"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "All-Rust 1st-stage bootloader for ESP32-P4. Replaces IDF v5.3 bootloader.bin (which has hard architectural assumptions about app segment layout that no_std Rust apps don't satisfy). ROM loads us from flash@0x2000; we init the chip, read the partition table, locate the factory app, verify its appended SHA256, load segments via cache, and jump to its entry."
+description = "All-Rust 1st-stage bootloader for ESP32-P4. Replaces IDF v5.3 bootloader.bin (which has hard architectural assumptions about app segment layout that no_std Rust apps don't satisfy). ROM loads us from flash@0x2000; we init the chip, read the partition table, locate the factory app, verify its appended SHA256, load segments via cache, surface any pending crash dump / boot-history / bootstat record, drive A/B-slot selection with rollback, and jump to the app entry."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/babasha/esp-p4-mini-bootloader"
 readme = "README.md"
@@ -14,19 +14,14 @@ name = "mini-bootloader"
 path = "src/main.rs"
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
-# Path overrides for in-progress workspace development. Before
-# publishing, drop the `path = …` half so cargo resolves to the
-# crates.io version (or bump the version pin to one that contains the
-# new APIs).
-bootloader = { package = "esp-p4-bootloader", version = "0.1", path = "../../esp-p4-bootloader/esp-p4-bootloader" }
-psram = { package = "esp-p4-psram", version = "0.1" }
-p4_cfg = { package = "esp-p4-cfg", path = "../../esp-p4-cfg" }
-p4_crashdump = { package = "esp-p4-crashdump", path = "../../esp-p4-crashdump" }
-p4_boot_history = { package = "esp-p4-boot-history", path = "../../esp-p4-boot-history" }
-p4_bootstat = { package = "esp-p4-bootstat", path = "../../esp-p4-bootstat" }
-p4_ota = { package = "esp-p4-ota", path = "../../esp-p4-ota" }
-riscv-rt = { version = "0.16", features = ["memory", "device"] }
-sha2 = { version = "0.10", default-features = false }
+bootloader       = { package = "esp-p4-bootloader",    version = "0.2" }
+psram            = { package = "esp-p4-psram",         version = "0.2" }
+p4_crashdump     = { package = "esp-p4-crashdump",     version = "0.1" }
+p4_boot_history  = { package = "esp-p4-boot-history",  version = "0.1" }
+p4_bootstat      = { package = "esp-p4-bootstat",      version = "0.1" }
+p4_ota           = { package = "esp-p4-ota",           version = "0.1" }
+riscv-rt         = { version = "0.16", features = ["memory", "device"] }
+sha2             = { version = "0.10", default-features = false }
 
 [profile.release]
 opt-level = "z"

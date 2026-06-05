@@ -1,26 +1,29 @@
 #![no_std]
 #![no_main]
 
-//! ESP32-P4 mini-bootloader — Phase 1 skeleton.
+//! ESP32-P4 mini-bootloader.
 //!
-//! The chip ROM bootloader loads this image from flash @ 0x2000 (per the
-//! standard `esp_image_header_t` format) and jumps to our `_start`. We
-//! then bring the chip up to a state where the app image can be loaded
-//! and executed.
+//! The chip ROM bootloader loads this image from flash @ 0x2000 (per
+//! the standard `esp_image_header_t` format) and jumps to our `_start`.
+//! From there we:
 //!
-//! Phase 1 (this file) does only:
-//!   1. UART hello
-//!   2. `bootloader::init_phase2_full()` — full chip-wide init
-//!   3. UART confirmation + heartbeat
+//! 1. Disable the ROM watchdogs and bring the chip fully up via
+//!    [`bootloader::init_phase2_full`].
+//! 2. Read the HP-system reset cause and surface any pending crash dump
+//!    / boot-history / bootstat record on UART before we touch the
+//!    PSRAM or app paths (so a recurring crash that faults during
+//!    those steps still gets last-boot diagnostics out).
+//! 3. Bring up PSRAM (non-fatal — HP-SRAM-only apps still boot).
+//! 4. Pick the active app slot from the otadata partition (A/B with
+//!    automatic rollback after `MAX_BOOT_ATTEMPTS` failed boots),
+//!    falling back to `factory` if both OTA slots are empty / corrupt.
+//! 5. Read the app image header, verify its appended SHA-256, load
+//!    segments through cache, arm the early-boot watchdog, and jump
+//!    to the entry point.
 //!
-//! Future phases will add:
-//!   - ROM SPI flash read of partition table @ 0x8000
-//!   - Locate factory app partition
-//!   - Load app image segments via memcpy from flash
-//!   - Jump to app entry_addr
-//!
-//! See task list and `MEMORY.md` reference `project_smartbox_bootloader`
-//! for the multi-session plan.
+//! On any unrecoverable failure (no app, header bad, hash mismatch,
+//! load error) we drop into [`heartbeat`] — a UART-only spin loop —
+//! so the device is recoverable over serial.
 
 use core::fmt::{self, Write};
 use core::hint::spin_loop;
@@ -34,9 +37,7 @@ mod boot_history_report;
 mod bootstat_report;
 mod crashdump_report;
 mod flash;
-mod gpio;
 mod partition;
-mod recovery;
 mod slot_select;
 mod verify;
 
@@ -45,22 +46,6 @@ mod verify;
 /// dump. Single-hart, no IRQs at boot, so plain `static mut` access is
 /// race-free.
 static mut UART_RING: p4_crashdump::UartRing<256> = p4_crashdump::UartRing::new();
-
-/// GPIO that acts as the recovery button. Active-low (held to GND for
-/// recovery), internal pull-up. Pick a non-strap pin on your hardware
-/// — boot strapping latches before this point on cold POR, so a strap
-/// pin would force the chip into UART download mode instead of running
-/// our bootloader. GPIO3 has no strap function on ESP32-P4.
-const RECOVERY_GPIO: u8 = 3;
-/// Hold the pin LOW for at least this long to engage recovery. A short
-/// glitch (capacitive coupling, noisy line) will not trigger it.
-const RECOVERY_HOLD_MS: u32 = 1500;
-const RECOVERY_POLL_MS: u32 = 50;
-/// CPU runs at ~360 MHz after `init_phase2_full`; `spin_loop` on RISC-V
-/// emits roughly one cycle per iteration, so this is the spin count
-/// for ~1 ms of busy-wait. Coarse — UX timing only, no need for
-/// accuracy.
-const SPIN_PER_MS: u32 = 360_000;
 
 /// Early-boot watchdog timeout. The bootloader arms TIMG1 with this
 /// budget right before jumping to the app. The app has until then to
@@ -155,17 +140,6 @@ fn main() -> ! {
 
     bootloader::init_phase2_full();
     let _ = writeln!(uart, "mini-bootloader: init_phase2_full() done");
-
-    // Recovery-mode entry: if the recovery GPIO is held LOW for the full
-    // RECOVERY_HOLD_MS window, drop into the UART provisioning shell and
-    // never return into the normal boot path. This must run before
-    // anything that could fault (PSRAM, partition parse, app load) so a
-    // bricked app or corrupt partition table can't lock the installer
-    // out of re-provisioning.
-    if check_recovery_held(&mut uart) {
-        let _ = writeln!(uart, "recovery GPIO held — entering recovery mode");
-        recovery::run();
-    }
 
     // Read the HP-system reset cause once, early. The latch is sticky
     // until POR or an explicit `_CLR` write — safe at any point during
@@ -358,37 +332,6 @@ fn drain_uart() {
     while txfifo_count() > 0 {
         spin_loop();
     }
-}
-
-/// Sample the recovery GPIO every `RECOVERY_POLL_MS` for up to
-/// `RECOVERY_HOLD_MS`. Returns `true` only if the pin was LOW on every
-/// sample (i.e. the installer held the button for the full window).
-fn check_recovery_held(uart: &mut Uart0) -> bool {
-    gpio::configure_input(RECOVERY_GPIO, gpio::Pull::Up);
-    // Settle delay so the internal pull-up has time to charge the line
-    // before the first sample (~5 ms is plenty for any reasonable C_load).
-    for _ in 0..(SPIN_PER_MS * 5) {
-        spin_loop();
-    }
-    if gpio::read(RECOVERY_GPIO) {
-        return false;
-    }
-    let _ = writeln!(
-        uart,
-        "recovery GPIO{} low — confirming hold for {} ms",
-        RECOVERY_GPIO, RECOVERY_HOLD_MS
-    );
-    let polls = RECOVERY_HOLD_MS / RECOVERY_POLL_MS;
-    for _ in 0..polls {
-        for _ in 0..(SPIN_PER_MS * RECOVERY_POLL_MS) {
-            spin_loop();
-        }
-        if gpio::read(RECOVERY_GPIO) {
-            let _ = writeln!(uart, "recovery GPIO released — booting normally");
-            return false;
-        }
-    }
-    true
 }
 
 fn heartbeat(uart: &mut Uart0) -> ! {
